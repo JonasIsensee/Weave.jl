@@ -22,6 +22,7 @@ Base.@kwdef mutable struct JMarkdown2tex <: TexFormat
     fig_env = nothing
     highlight_theme = nothing
     template = normpath(TEMPLATE_DIR, "md2pdf.tpl")
+    tex_deps = ""
 end
 register_format!("md2tex", JMarkdown2tex())
 register_format!("md2pdf", JMarkdown2tex())
@@ -44,6 +45,7 @@ Base.@kwdef mutable struct Tex <: TexFormat
     out_height = nothing
     highlight_theme = nothing
     template = normpath(TEMPLATE_DIR, "md2pdf.tpl")
+    tex_deps = ""
 end
 register_format!("tex", Tex())
 
@@ -68,21 +70,27 @@ Base.@kwdef mutable struct TexMinted <: TexFormat
     fig_pos = "htpb"
     highlight_theme = nothing
     template = normpath(TEMPLATE_DIR, "md2pdf.tpl")
+    tex_deps = "\\usepackage{minted}"
 end
 register_format!("texminted", TexMinted())
 
 
-function render_doc(docformat::JMarkdown2tex, body, doc, _)
+highlight_str(docformat::TexFormat) = ""
+highlight_str(docformat::JMarkdown2tex) =
+    get_highlight_stylesheet(MIME("text/latex"), docformat.highlight_theme)
+
+function render_doc(docformat::TexFormat, body, doc, _)
     return Mustache.render(
         get_tex_template(docformat.template);
         body = body,
-        highlight = get_highlight_stylesheet(MIME("text/latex"), docformat.highlight_theme),
+        highlight = highlight_str(docformat),
+        tex_deps = docformat.tex_deps,
         [Pair(Symbol(k), v) for (k, v) in doc.header]...,
     )
 end
 
 # very similar to export to html
-function format_chunk(chunk::DocChunk, docformat::JMarkdown2tex)
+function format_chunk(chunk::DocChunk, docformat::TexFormat)
     out = IOBuffer()
     io = IOBuffer()
     for inline in chunk.content
@@ -102,7 +110,7 @@ function format_chunk(chunk::DocChunk, docformat::JMarkdown2tex)
     return docformat.keep_unicode ? out : uc2tex(out)
 end
 
-function format_output(result, docformat::JMarkdown2tex)
+function format_output(result, docformat::TexFormat)
     # Highligts has some extra escaping defined, eg of $, ", ...
     result_escaped = sprint(
         (io, x) ->
@@ -113,8 +121,14 @@ function format_output(result, docformat::JMarkdown2tex)
     return result_escaped
 end
 
-function format_code(code, docformat::JMarkdown2tex)
-    ret = highlight_code(MIME("text/latex"), code, docformat.highlight_theme)
+
+# Highlight code is currently only compatible with lstlistings (JMarkdown2tex)
+highlight_code(code, docformat::TexFormat) = code
+highlight_code(code, docformat::JMarkdown2tex) =
+    highlight_code(MIME("text/latex"), code, docformat.highlight_theme)
+
+function format_code(code, docformat::TexFormat)
+    ret = highlight_code(code, docformat)
     docformat.keep_unicode || return uc2tex(ret)
     return ret
 end
@@ -133,7 +147,11 @@ function uc2tex(s, escape = false)
 end
 
 
-#should_render(chunk) ? highlight_term(MIME("text/latex"), , docformat.highlight_theme) : ""
+# return "\\begin{minted}[mathescape, fontsize=\\small, xleftmargin=0.5em]{julia}\n$result\n\\end{minted}\n"
+format_termchunk(chunk, docformat::TexFormat) =
+    string(docformat.termstart, chunk.output, docformat.termend, '\n')
+
+    #should_render(chunk) ? highlight_term(MIME("text/latex"), , docformat.highlight_theme) : ""
 format_termchunk(chunk, docformat::JMarkdown2tex) =
     should_render(chunk) ? highlight_term(MIME("text/latex"), chunk.output, docformat.highlight_theme) : ""
 
